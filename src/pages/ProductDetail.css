@@ -1,0 +1,223 @@
+.product-detail-page {
+  padding: 120px 0 6rem;
+  min-height: 80vh;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-light);
+  text-decoration: none;
+  font-weight: 500;
+  margin-bottom: 2rem;
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.back-link:hover {
+  color: var(--color-primary);
+  transform: translateX(-4px);
+}
+
+.product-detail-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+  padding: 3rem;
+  border-radius: 24px;
+}
+
+.product-detail-image-wrapper {
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: #e2e8f0;
+  aspect-ratio: 4/3;
+  width: 100%;
+  position: relative;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+}
+
+.product-detail-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.product-detail-image-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 5rem;
+  opacity: 0.4;
+}
+
+.product-detail-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.product-detail-category {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--color-primary-dark);
+  padding: 0.35rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 1rem;
+  width: max-content;
+}
+
+.product-detail-name {
+  font-size: 2.5rem;
+  color: var(--color-text);
+  margin-bottom: 1rem;
+  line-height: 1.1;
+}
+
+.product-detail-price-box {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  margin-bottom: 2.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.product-detail-amount {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+}
+
+.product-detail-unit {
+  font-size: 1.1rem;
+  color: var(--color-text-light);
+  font-weight: 500;
+}
+
+.product-detail-description-section h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  color: var(--color-text);
+}
+
+.product-detail-description {
+  font-size: 1.1rem;
+  color: var(--color-text-light);
+  line-height: 1.7;
+  margin-bottom: 1.5rem;
+}
+
+.product-detail-features {
+  list-style: none;
+  margin-bottom: 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.product-detail-features li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.feature-icon {
+  font-size: 1.25rem;
+}
+
+.product-detail-actions {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin-top: auto;
+}
+
+.product-detail-quantity {
+  display: flex;
+  align-items: center;
+  background: white;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 12px;
+  padding: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+}
+
+.product-detail-quantity button {
+  background: var(--color-bg);
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all var(--transition-fast);
+  font-size: 1.25rem;
+}
+
+.product-detail-quantity button:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+.product-detail-quantity span {
+  padding: 0 1.5rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+}
+
+.product-detail-add-btn {
+  flex: 1;
+  padding: 1.25rem 2rem;
+  font-size: 1.1rem;
+  border-radius: 12px;
+  height: 60px;
+}
+
+.product-detail-add-btn.added {
+  background-color: var(--color-accent);
+  box-shadow: 0 4px 14px rgba(132, 204, 22, 0.3);
+}
+
+@media (max-width: 900px) {
+  .product-detail-container {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    padding: 2rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .product-detail-page {
+    padding-top: 100px;
+  }
+  
+  .product-detail-container {
+    padding: 1.5rem;
+  }
+  
+  .product-detail-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .product-detail-quantity {
+    justify-content: space-between;
+  }
+}
