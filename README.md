@@ -1,16 +1,93 @@
 # E-Shop
 
-A modern e-commerce platform built with React and Vite.
+A modern, full-stack e-commerce platform built for high performance and scalability. This project features a responsive React frontend powered by Vite and a robust Node.js backend with SQLite.
 
-Currently, two official plugins are available:
+## 🚀 Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Frontend**: React 19, Vite, React Router 7
+- **Backend**: Node.js, Express, SQLite3
+- **Authentication**: JWT (JSON Web Tokens), Bcrypt.js
+- **Styling**: Vanilla CSS (Modern CSS variables and flex/grid layout)
 
-## React Compiler
+## 📁 Project Structure
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `/src`: React frontend source code.
+- `/backend`: Node.js Express server and SQLite database.
+- `/public`: Static assets (images, icons).
 
-## Expanding the ESLint configuration
+## 🛠️ Getting Started
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v18.0.0 or higher)
+- [npm](https://www.npmjs.com/) (v9.0.0 or higher)
+
+### Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/k-s-sync/eshop.git
+   cd eshop
+   ```
+
+2. **Install Frontend dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **Install Backend dependencies**:
+   ```bash
+   cd backend
+   npm install
+   cd ..
+   ```
+
+## 💻 Development
+
+To run the application locally in development mode:
+
+1. **Start the Backend**:
+   ```bash
+   cd backend
+   npm start
+   ```
+   The backend will run on `http://localhost:5000`.
+
+2. **Start the Frontend**:
+   (In a separate terminal)
+   ```bash
+   npm run dev
+   ```
+   The frontend will run on `http://localhost:5173`.
+
+## 📦 Build & Deployment
+
+### Building for Production
+
+To create a production-ready build of the frontend:
+
+```bash
+npm run build
+```
+This command generates a `dist` folder containing optimized static files.
+
+### Deployment
+
+#### 1. Frontend Deployment
+The contents of the `dist` folder can be hosted on any static site host, such as:
+- **Netlify** / **Vercel**: Connect your GitHub repository and set the build command to `npm run build` and the output directory to `dist`.
+- **Nginx**: Point your Nginx configuration to the `dist` folder.
+
+#### 2. Backend Deployment
+The backend can be deployed to platforms like **Heroku**, **Render**, or a **VPS**:
+- Ensure the `PORT` environment variable is correctly set.
+- Ensure the `database.sqlite` file has appropriate read/write permissions.
+- Use a process manager like `pm2` to keep the server running:
+  ```bash
+  cd backend
+  pm2 start server.js --name eshop-backend
+  ```
+
+---
+
+*Verified and Maintained by Antigravity AI.*
