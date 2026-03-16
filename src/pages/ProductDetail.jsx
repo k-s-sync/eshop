@@ -16,7 +16,7 @@ const ProductDetail = () => {
     // Scroll to top when loading the page
     window.scrollTo(0, 0);
     
-    fetch(`http://localhost:5000/api/products/${id}`)
+    fetch(`/api/products/${id}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {

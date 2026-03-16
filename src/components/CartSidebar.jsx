@@ -37,7 +37,7 @@ const CartSidebar = () => {
   // Fetch addresses if logged in
   useEffect(() => {
     if (user && token && isCartOpen) {
-      fetch('http://localhost:5000/api/addresses', {
+      fetch('/api/addresses', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
@@ -100,7 +100,7 @@ const CartSidebar = () => {
 
     try {
       // 1. Fetch Transaction Token from Node backend
-      const response = await fetch('http://localhost:5000/api/payment/initiate', {
+      const response = await fetch('/api/payment/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

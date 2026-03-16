@@ -26,7 +26,7 @@ const Home = () => {
     if (category !== 'All') queryParams.append('category', category);
     if (debouncedSearch) queryParams.append('search', debouncedSearch);
 
-    fetch(`http://localhost:5000/api/products?${queryParams.toString()}`)
+    fetch(`/api/products?${queryParams.toString()}`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {

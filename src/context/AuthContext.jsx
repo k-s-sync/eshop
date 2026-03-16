@@ -10,7 +10,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     if (token) {
       // Fetch user profile to restore session
-      fetch('http://localhost:5000/api/profile', {
+      fetch('/api/profile', {
         headers: {
           'Authorization': `Bearer ${token}`
         }

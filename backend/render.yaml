@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: eshop-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        fromEnvVar: SUPABASE_URL
+      - key: SUPABASE_KEY
+        fromEnvVar: SUPABASE_KEY
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        fromEnvVar: FRONTEND_URL
+      - key: PAYTM_MERCHANT_ID
+        fromEnvVar: PAYTM_MERCHANT_ID
+      - key: PAYTM_MERCHANT_KEY
+        fromEnvVar: PAYTM_MERCHANT_KEY
+      - key: PAYTM_WEBSITE
+        fromEnvVar: PAYTM_WEBSITE
+      - key: PAYTM_ENVIRONMENT
+        fromEnvVar: PAYTM_ENVIRONMENT
+      - key: PAYTM_CALLBACK_URL
+        fromEnvVar: PAYTM_CALLBACK_URL

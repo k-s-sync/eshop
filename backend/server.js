@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-const db = require('./db');
+const supabase = require('./supabase');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -47,13 +47,21 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Admin Middleware
-const isAdmin = (req, res, next) => {
-    db.get(`SELECT is_admin FROM users WHERE id = ?`, [req.user.id], (err, user) => {
-        if (err || !user || user.is_admin !== 1) {
+const isAdmin = async (req, res, next) => {
+    try {
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('is_admin')
+            .eq('id', req.user.id)
+            .single();
+
+        if (error || !user || user.is_admin !== true) {
             return res.status(403).json({ success: false, message: 'Admin access required' });
         }
         next();
-    });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
 };
 
 // Middleware
@@ -79,66 +87,84 @@ app.post('/api/auth/register', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
 
-        // Insert into DB
-        db.run(`INSERT INTO users (full_name, email, phone, password_hash) VALUES (?, ?, ?, ?)`, 
-            [fullName, email, phone, passwordHash], 
-            function(err) {
-                if (err) {
-                    if (err.message.includes('UNIQUE constraint failed')) {
-                        return res.status(400).json({ success: false, message: 'Email already exists' });
-                    }
-                    console.error(err);
-                    return res.status(500).json({ success: false, message: 'Database error' });
-                }
-                
-                // Auto-login after registration
-                const token = jwt.sign({ id: this.lastID, email }, JWT_SECRET, { expiresIn: '7d' });
-                res.status(201).json({ success: true, message: 'Registration successful', token });
+        // Insert into Supabase
+        const { data, error } = await supabase
+            .from('users')
+            .insert([
+                { full_name: fullName, email: email, phone: phone, password_hash: passwordHash }
+            ])
+            .select();
+
+        if (error) {
+            if (error.code === '23505') { // Postgres UNIQUE constraint violation code
+                return res.status(400).json({ success: false, message: 'Email already exists' });
             }
-        );
+            console.error(error);
+            return res.status(500).json({ success: false, message: 'Database error' });
+        }
+
+        const newUser = data[0];
+        // Auto-login after registration
+        const token = jwt.sign({ id: newUser.id, email }, JWT_SECRET, { expiresIn: '7d' });
+        res.status(201).json({ success: true, message: 'Registration successful', token });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
 // Login User
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
         return res.status(400).json({ success: false, message: 'Please provide email and password' });
     }
 
-    db.get(`SELECT * FROM users WHERE email = ?`, [email], async (err, user) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (!user) return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
 
-        const isMatch = await bcrypt.compare(password, user.password_hash);
-        if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    if (error || !user) {
+        return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    }
 
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ success: true, message: 'Login successful', token, user: { id: user.id, name: user.full_name, email: user.email, is_admin: user.is_admin } });
-    });
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid credentials' });
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ success: true, message: 'Login successful', token, user: { id: user.id, name: user.full_name, email: user.email, is_admin: user.is_admin } });
 });
 
 // Forgot Password
-app.post('/api/auth/forgot-password', (req, res) => {
+app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     
-    db.get(`SELECT id FROM users WHERE email = ?`, [email], (err, user) => {
-        if (err || !user) {
-            // We return success anyway to prevent email enumeration attacks
-            return res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
-        }
+    const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email)
+        .single();
 
-        // Generate a random token
-        const resetToken = require('crypto').randomBytes(32).toString('hex');
-        const tokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
+    if (userError || !user) {
+        // We return success anyway to prevent email enumeration attacks
+        return res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
+    }
 
-        db.run(`UPDATE users SET reset_token = ?, reset_expiry = ? WHERE id = ?`, [resetToken, tokenExpiry.toISOString(), user.id], function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
+    // Generate a random token
+    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const tokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
 
-            const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5174'}/reset-password?token=${resetToken}`;
+    const { error: updateError } = await supabase
+        .from('users')
+        .update({ reset_token: resetToken, reset_expiry: tokenExpiry.toISOString() })
+        .eq('id', user.id);
+
+    if (updateError) return res.status(500).json({ success: false, message: 'Database error' });
+
+    const defaultFrontendUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5174';
+    const resetLink = `${process.env.FRONTEND_URL || defaultFrontendUrl}/reset-password?token=${resetToken}`;
             
             const mailOptions = {
                 from: '"FreshHarvest Admin" <admin@freshharvest.local>',
@@ -158,8 +184,6 @@ app.post('/api/auth/forgot-password', (req, res) => {
             }
 
             res.json({ success: true, message: 'If that email is registered, a reset link has been sent.' });
-        });
-    });
 });
 
 // Reset Password
@@ -170,36 +194,51 @@ app.post('/api/auth/reset-password', async (req, res) => {
         return res.status(400).json({ success: false, message: 'Token and new password are required' });
     }
 
-    db.get(`SELECT id FROM users WHERE reset_token = ? AND reset_expiry > ?`, [token, new Date().toISOString()], async (err, user) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('reset_token', token)
+        .gt('reset_expiry', new Date().toISOString())
+        .single();
 
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(newPassword, salt);
+    if (userError || !user) {
+        return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    }
 
-        db.run(`UPDATE users SET password_hash = ?, reset_token = NULL, reset_expiry = NULL WHERE id = ?`, [passwordHash, user.id], function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            res.json({ success: true, message: 'Password has been successfully reset' });
-        });
-    });
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(newPassword, salt);
+
+    const { error: updateError } = await supabase
+        .from('users')
+        .update({ password_hash: passwordHash, reset_token: null, reset_expiry: null })
+        .eq('id', user.id);
+
+    if (updateError) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, message: 'Password has been successfully reset' });
 });
 
 // Get User Profile
-app.get('/api/profile', authenticateToken, (req, res) => {
-    db.get(`SELECT id, full_name, email, phone, is_admin, created_at FROM users WHERE id = ?`, [req.user.id], (err, user) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-        res.json({ success: true, user });
-    });
+app.get('/api/profile', authenticateToken, async (req, res) => {
+    const { data: user, error } = await supabase
+        .from('users')
+        .select('id, full_name, email, phone, is_admin, created_at')
+        .eq('id', req.user.id)
+        .single();
+
+    if (error || !user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, user });
 });
 
 // Update Profile
-app.put('/api/profile', authenticateToken, (req, res) => {
+app.put('/api/profile', authenticateToken, async (req, res) => {
     const { fullName, phone } = req.body;
-    db.run(`UPDATE users SET full_name = ?, phone = ? WHERE id = ?`, [fullName, phone, req.user.id], function(err) {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, message: 'Profile updated successfully' });
-    });
+    const { error } = await supabase
+        .from('users')
+        .update({ full_name: fullName, phone: phone })
+        .eq('id', req.user.id);
+
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, message: 'Profile updated successfully' });
 });
 
 // ==========================================
@@ -207,70 +246,79 @@ app.put('/api/profile', authenticateToken, (req, res) => {
 // ==========================================
 
 // Get all addresses for user
-app.get('/api/addresses', authenticateToken, (req, res) => {
-    db.all(`SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC`, [req.user.id], (err, addresses) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, addresses });
-    });
+app.get('/api/addresses', authenticateToken, async (req, res) => {
+    const { data: addresses, error } = await supabase
+        .from('addresses')
+        .select('*')
+        .eq('user_id', req.user.id)
+        .order('is_default', { ascending: false })
+        .order('id', { ascending: false });
+
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, addresses });
 });
 
 // Add new address
-app.post('/api/addresses', authenticateToken, (req, res) => {
+app.post('/api/addresses', authenticateToken, async (req, res) => {
     const { addressLine, city, state, postalCode, isDefault } = req.body;
     
-    // If setting as default, unset other defaults first
-    const insertAddress = () => {
-        db.run(`INSERT INTO addresses (user_id, address_line, city, state, postal_code, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-            [req.user.id, addressLine, city, state, postalCode, isDefault ? 1 : 0],
-            function(err) {
-                if (err) return res.status(500).json({ success: false, message: 'Database error' });
-                res.status(201).json({ success: true, message: 'Address added', addressId: this.lastID });
-            }
-        );
-    };
+    try {
+        if (isDefault) {
+            await supabase
+                .from('addresses')
+                .update({ is_default: false })
+                .eq('user_id', req.user.id);
+        }
 
-    if (isDefault) {
-        db.run(`UPDATE addresses SET is_default = 0 WHERE user_id = ?`, [req.user.id], function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            insertAddress();
-        });
-    } else {
-        insertAddress();
+        const { data, error } = await supabase
+            .from('addresses')
+            .insert([
+                { user_id: req.user.id, address_line: addressLine, city, state, postal_code: postalCode, is_default: isDefault }
+            ])
+            .select();
+
+        if (error) return res.status(500).json({ success: false, message: 'Database error' });
+        res.status(201).json({ success: true, message: 'Address added', addressId: data[0].id });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
 // Edit address
-app.put('/api/addresses/:id', authenticateToken, (req, res) => {
+app.put('/api/addresses/:id', authenticateToken, async (req, res) => {
     const { addressLine, city, state, postalCode, isDefault } = req.body;
     
-    // If setting as default, unset other defaults first
-    const updateAddress = () => {
-        db.run(`UPDATE addresses SET address_line = ?, city = ?, state = ?, postal_code = ?, is_default = ? WHERE id = ? AND user_id = ?`,
-            [addressLine, city, state, postalCode, isDefault ? 1 : 0, req.params.id, req.user.id],
-            function(err) {
-                if (err) return res.status(500).json({ success: false, message: 'Database error' });
-                if (this.changes === 0) return res.status(404).json({ success: false, message: 'Address not found or unauthorized' });
-                res.json({ success: true, message: 'Address updated' });
-            }
-        );
-    };
+    try {
+        if (isDefault) {
+            await supabase
+                .from('addresses')
+                .update({ is_default: false })
+                .eq('user_id', req.user.id);
+        }
 
-    if (isDefault) {
-        db.run(`UPDATE addresses SET is_default = 0 WHERE user_id = ?`, [req.user.id], function(err) {
-            if (err) return res.status(500).json({ success: false, message: 'Database error' });
-            updateAddress();
-        });
-    } else {
-        updateAddress();
+        const { error } = await supabase
+            .from('addresses')
+            .update({ address_line: addressLine, city, state, postal_code: postalCode, is_default: isDefault })
+            .eq('id', req.params.id)
+            .eq('user_id', req.user.id);
+
+        if (error) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json({ success: true, message: 'Address updated' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
 // Delete address
-app.delete('/api/addresses/:id', authenticateToken, (req, res) => {
-    db.run(`DELETE FROM addresses WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id], function(err) {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, message: 'Address deleted' });
-    });
+app.delete('/api/addresses/:id', authenticateToken, async (req, res) => {
+    const { error } = await supabase
+        .from('addresses')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('user_id', req.user.id);
+
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, message: 'Address deleted' });
 });
 
 // ==========================================
@@ -278,35 +326,34 @@ app.delete('/api/addresses/:id', authenticateToken, (req, res) => {
 // ==========================================
 
 // Get all products (Public)
-app.get('/api/products', (req, res) => {
+app.get('/api/products', async (req, res) => {
     const { category, search } = req.query;
     
-    let query = `SELECT * FROM products WHERE 1=1`;
-    let params = [];
+    let query = supabase.from('products').select('*');
     
     if (category && category !== 'All') {
-        query += ` AND category = ?`;
-        params.push(category);
+        query = query.eq('category', category);
     }
     
     if (search) {
-        query += ` AND name LIKE ?`;
-        params.push(`%${search}%`);
+        query = query.ilike('name', `%${search}%`);
     }
 
-    db.all(query, params, (err, products) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, products });
-    });
+    const { data: products, error } = await query;
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, products });
 });
 
 // Get single product (Public)
-app.get('/api/products/:id', (req, res) => {
-    db.get(`SELECT * FROM products WHERE id = ?`, [req.params.id], (err, product) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-        res.json({ success: true, product });
-    });
+app.get('/api/products/:id', async (req, res) => {
+    const { data: product, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', req.params.id)
+        .single();
+
+    if (error || !product) return res.status(404).json({ success: false, message: 'Product not found' });
+    res.json({ success: true, product });
 });
 
 // ==========================================
@@ -316,99 +363,100 @@ app.get('/api/products/:id', (req, res) => {
 // --- Admin: Products ---
 
 // Add a Product
-app.post('/api/admin/products', authenticateToken, isAdmin, (req, res) => {
+app.post('/api/admin/products', authenticateToken, isAdmin, async (req, res) => {
     const { id, name, price, unit, category, description, image } = req.body;
-    db.run(`INSERT INTO products (id, name, price, unit, category, description, image) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [id, name, price, unit, category, description, image],
-        function(err) {
-            if (err) return res.status(500).json({ success: false, message: err.message });
-            res.status(201).json({ success: true, message: 'Product created' });
-        }
-    );
+    const { error } = await supabase
+        .from('products')
+        .insert([{ id, name, price, unit, category, description, image }]);
+
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    res.status(201).json({ success: true, message: 'Product created' });
 });
 
 // Update a Product
-app.put('/api/admin/products/:id', authenticateToken, isAdmin, (req, res) => {
+app.put('/api/admin/products/:id', authenticateToken, isAdmin, async (req, res) => {
     const { name, price, unit, category, description, image } = req.body;
-    db.run(`UPDATE products SET name = ?, price = ?, unit = ?, category = ?, description = ?, image = ? WHERE id = ?`,
-        [name, price, unit, category, description, image, req.params.id],
-        function(err) {
-            if (err) return res.status(500).json({ success: false, message: err.message });
-            if (this.changes === 0) return res.status(404).json({ success: false, message: 'Product not found' });
-            res.json({ success: true, message: 'Product updated' });
-        }
-    );
+    const { error } = await supabase
+        .from('products')
+        .update({ name, price, unit, category, description, image })
+        .eq('id', req.params.id);
+
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    res.json({ success: true, message: 'Product updated' });
 });
 
 // Delete a Product
-app.delete('/api/admin/products/:id', authenticateToken, isAdmin, (req, res) => {
-    db.run(`DELETE FROM products WHERE id = ?`, [req.params.id], function(err) {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        res.json({ success: true, message: 'Product deleted' });
-    });
+app.delete('/api/admin/products/:id', authenticateToken, isAdmin, async (req, res) => {
+    const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', req.params.id);
+
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, message: 'Product deleted' });
 });
 
 // --- Admin: Orders ---
 
 // Get all orders (Admin)
-app.get('/api/admin/orders', authenticateToken, isAdmin, (req, res) => {
-    const query = `
-        SELECT orders.*, users.full_name as customer_name, users.email as customer_email 
-        FROM orders 
-        LEFT JOIN users ON orders.user_id = users.id 
-        ORDER BY orders.created_at DESC
-    `;
-    
-    db.all(query, [], (err, orders) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
+app.get('/api/admin/orders', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const { data: orders, error } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                customer:users(full_name, email),
+                items:order_items(*)
+            `)
+            .order('created_at', { ascending: false });
+
+        if (error) return res.status(500).json({ success: false, message: 'Database error' });
         
-        if (orders.length === 0) return res.json({ success: true, orders: [] });
-        
-        let processedOrders = 0;
-        orders.forEach(order => {
-            db.all(`SELECT * FROM order_items WHERE order_id = ?`, [order.id], (err, items) => {
-                order.items = items || [];
-                processedOrders++;
-                if (processedOrders === orders.length) {
-                    res.json({ success: true, orders });
-                }
-            });
-        });
-    });
+        // Map data to match expected frontend structure if necessary
+        const formattedOrders = orders.map(order => ({
+            ...order,
+            customer_name: order.customer?.full_name,
+            customer_email: order.customer?.email
+        }));
+
+        res.json({ success: true, orders: formattedOrders });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
 // Update Order Status (Admin)
-app.put('/api/admin/orders/:id/status', authenticateToken, isAdmin, (req, res) => {
+app.put('/api/admin/orders/:id/status', authenticateToken, isAdmin, async (req, res) => {
     const { status } = req.body;
-    db.run(`UPDATE orders SET status = ? WHERE id = ?`, [status, req.params.id], function(err) {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        if (this.changes === 0) return res.status(404).json({ success: false, message: 'Order not found' });
-        res.json({ success: true, message: 'Order status updated' });
-    });
+    const { error } = await supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', req.params.id);
+
+    if (error) return res.status(500).json({ success: false, message: 'Database error' });
+    res.json({ success: true, message: 'Order status updated' });
 });
 
 // ==========================================
 // ORDER ROUTES (HISTORY)
 // ==========================================
 
-app.get('/api/orders', authenticateToken, (req, res) => {
-    db.all(`SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC`, [req.user.id], (err, orders) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error' });
-        
-        // Map order items to each order
-        if (orders.length === 0) return res.json({ success: true, orders: [] });
-        
-        let processedOrders = 0;
-        orders.forEach(order => {
-            db.all(`SELECT * FROM order_items WHERE order_id = ?`, [order.id], (err, items) => {
-                order.items = items || [];
-                processedOrders++;
-                if (processedOrders === orders.length) {
-                    res.json({ success: true, orders });
-                }
-            });
-        });
-    });
+app.get('/api/orders', authenticateToken, async (req, res) => {
+    try {
+        const { data: orders, error } = await supabase
+            .from('orders')
+            .select(`
+                *,
+                items:order_items(*)
+            `)
+            .eq('user_id', req.user.id)
+            .order('created_at', { ascending: false });
+
+        if (error) return res.status(500).json({ success: false, message: 'Database error' });
+        res.json({ success: true, orders });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
 });
 
 // ==========================================
@@ -420,24 +468,41 @@ app.post('/api/payment/initiate', async (req, res) => {
     try {
         const { orderId, amount, items, customerName, customerEmail, customerPhone, address, userId } = req.body;
 
-        // Pending Order Creation in DB before Paytm redirect
-        db.run(`INSERT INTO orders (user_id, tx_order_id, total_amount, status, address_line, city, state, postal_code) 
-                VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?)`,
-            [userId || null, orderId, amount, address?.addressLine, address?.city, address?.state, address?.postalCode],
-            function(err) {
-                if (err) console.error("Could not insert pending order:", err);
-                const dbOrderId = this ? this.lastID : null;
-                
-                // Insert items if dbOrderId exists
-                if (dbOrderId && items && items.length > 0) {
-                    items.forEach(item => {
-                        db.run(`INSERT INTO order_items (order_id, product_name, price, quantity) VALUES (?, ?, ?, ?)`,
-                            [dbOrderId, item.name, item.price, item.quantity]
-                        );
-                    });
+        // Pending Order Creation in Supabase before Paytm redirect
+        const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .insert([
+                { 
+                    user_id: userId || null, 
+                    tx_order_id: orderId, 
+                    total_amount: amount, 
+                    status: 'PENDING', 
+                    address_line: address?.addressLine, 
+                    city: address?.city, 
+                    state: address?.state, 
+                    postal_code: address?.postalCode 
                 }
+            ])
+            .select();
+
+        if (orderError) {
+            console.error("Could not insert pending order:", orderError);
+        } else {
+            const dbOrder = orderData[0];
+            // Insert items if dbOrder exists
+            if (dbOrder && items && items.length > 0) {
+                const orderItems = items.map(item => ({
+                    order_id: dbOrder.id,
+                    product_name: item.name,
+                    price: item.price,
+                    quantity: item.quantity
+                }));
+                const { error: itemsError } = await supabase
+                    .from('order_items')
+                    .insert(orderItems);
+                if (itemsError) console.error("Could not insert order items:", itemsError);
             }
-        );
+        }
 
         const paytmParams = {};
         
@@ -515,7 +580,7 @@ app.post('/api/payment/initiate', async (req, res) => {
 });
 
 // Paytm Callback handling Payment Status
-app.post('/api/payment/callback', (req, res) => {
+app.post('/api/payment/callback', async (req, res) => {
     const paytmParams = req.body;
     
     // Extract Checksum Hash
@@ -529,7 +594,8 @@ app.post('/api/payment/callback', (req, res) => {
         paytmChecksum
     );
     
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5174';
+    const defaultFrontendUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5174';
+    const frontendUrl = process.env.FRONTEND_URL || defaultFrontendUrl;
 
     if (isVerifySignature) {
         if (paytmParams.STATUS === 'TXN_SUCCESS') {
@@ -537,66 +603,59 @@ app.post('/api/payment/callback', (req, res) => {
             console.log('Payment Successful. TXN ID:', paytmParams.TXNID);
             
             // Update order status in database
-            db.run(`UPDATE orders SET status = 'PAID', payment_id = ? WHERE tx_order_id = ?`, 
-                [paytmParams.TXNID, paytmParams.ORDERID], 
-                function(err) {
-                    if (err) {
-                        console.error("Failed to update order status to PAID:", err);
-                        return;
-                    }
+            const { error: updateError } = await supabase
+                .from('orders')
+                .update({ status: 'PAID', payment_id: paytmParams.TXNID })
+                .eq('tx_order_id', paytmParams.ORDERID);
 
-                    // Fire Order Confirmation Email
-                    db.get(`
-                        SELECT o.*, u.email as user_email 
-                        FROM orders o 
-                        LEFT JOIN users u ON o.user_id = u.id 
-                        WHERE o.tx_order_id = ?
-                    `, [paytmParams.ORDERID], (err, order) => {
-                        if (!err && order && transporter) {
+            if (updateError) {
+                console.error("Failed to update order status to PAID:", updateError);
+            } else {
+                // Fire Order Confirmation Email
+                const { data: orderData, error: orderFetchError } = await supabase
+                    .from('orders')
+                    .select(`
+                        *,
+                        customer:users(email),
+                        items:order_items(*)
+                    `)
+                    .eq('tx_order_id', paytmParams.ORDERID)
+                    .single();
+
+                if (!orderFetchError && orderData && transporter) {
+                    const emailToSendTo = orderData.customer?.email || 'guest@example.com';
+                    const itemsHtml = orderData.items.map(item => `<li>${item.quantity}x ${item.product_name} - ₹${item.price}</li>`).join('');
+                    
+                    const mailOptions = {
+                        from: '"FreshHarvest Orders" <orders@freshharvest.local>',
+                        to: emailToSendTo,
+                        subject: `Order Confirmation #${orderData.id} - FreshHarvest`,
+                        html: `
+                            <h1>Thank you for your order!</h1>
+                            <p>Your payment of <strong>₹${orderData.total_amount}</strong> has been received (Transaction ID: ${paytmParams.TXNID}).</p>
                             
-                            // Get the actual email (either attached to the order or the user account)
-                            const emailToSendTo = order.user_email || 'guest@example.com';
+                            <h3>Order Details:</h3>
+                            <ul>
+                                ${itemsHtml}
+                            </ul>
                             
-                            if (emailToSendTo) {
-                                db.all(`SELECT * FROM order_items WHERE order_id = ?`, [order.id], (err, items) => {
-                                    if (!err && items) {
-                                        const itemsHtml = items.map(item => `<li>${item.quantity}x ${item.product_name} - ₹${item.price}</li>`).join('');
-                                        
-                                        const mailOptions = {
-                                            from: '"FreshHarvest Orders" <orders@freshharvest.local>',
-                                            to: emailToSendTo,
-                                            subject: `Order Confirmation #${order.id} - FreshHarvest`,
-                                            html: `
-                                                <h1>Thank you for your order!</h1>
-                                                <p>Your payment of <strong>₹${order.total_amount}</strong> has been received (Transaction ID: ${paytmParams.TXNID}).</p>
-                                                
-                                                <h3>Order Details:</h3>
-                                                <ul>
-                                                    ${itemsHtml}
-                                                </ul>
-                                                
-                                                <h3>Delivery Address:</h3>
-                                                <p>
-                                                    ${order.address_line}<br>
-                                                    ${order.city}, ${order.state} ${order.postal_code}
-                                                </p>
-                                                
-                                                <p>We are preparing your fresh vegetables for delivery!</p>
-                                            `
-                                        };
+                            <h3>Delivery Address:</h3>
+                            <p>
+                                ${orderData.address_line}<br>
+                                ${orderData.city}, ${orderData.state} ${orderData.postal_code}
+                            </p>
                             
-                                        transporter.sendMail(mailOptions, (error, info) => {
-                                            if (!error) {
-                                                console.log('Order Confirmation preview URL: %s', nodemailer.getTestMessageUrl(info));
-                                            }
-                                        });
-                                    }
-                                });
-                            }
+                            <p>We are preparing your fresh vegetables for delivery!</p>
+                        `
+                    };
+        
+                    transporter.sendMail(mailOptions, (error, info) => {
+                        if (!error) {
+                            console.log('Order Confirmation preview URL: %s', nodemailer.getTestMessageUrl(info));
                         }
                     });
                 }
-            );
+            }
 
             // Redirect to Success Page with Order ID
             res.redirect(`${frontendUrl}/order-confirmation?orderId=${paytmParams.ORDERID}`);
@@ -604,7 +663,10 @@ app.post('/api/payment/callback', (req, res) => {
             // Transaction failed
             console.log('Payment Failed. TXN ID:', paytmParams.TXNID);
             
-            db.run(`UPDATE orders SET status = 'FAILED' WHERE tx_order_id = ?`, [paytmParams.ORDERID]);
+            await supabase
+                .from('orders')
+                .update({ status: 'FAILED' })
+                .eq('tx_order_id', paytmParams.ORDERID);
 
             // Redirect to Failure Page
             res.redirect(`${frontendUrl}/payment-failed?orderId=${paytmParams.ORDERID}`);
@@ -615,6 +677,45 @@ app.post('/api/payment/callback', (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+// Seeding logic for initial products
+const seedProducts = async () => {
+    try {
+        const { count, error: countError } = await supabase
+            .from('products')
+            .select('*', { count: 'exact', head: true });
+
+        if (countError) {
+            console.error("Error checking products count:", countError);
+            return;
+        }
+
+        if (count === 0) {
+            console.log("Seeding initial products into Supabase...");
+            const initialProducts = [
+                { id: 'v1', name: 'Organic Heirloom Tomatoes', price: 4.99, unit: 'lb', category: 'Fruits & Veg', description: 'Vibrant, juicy, and bursting with rich, earthy flavor. Grown locally without synthetic pesticides.', image: 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?auto=format&fit=crop&q=80&w=800' },
+                { id: 'v2', name: 'Fresh English Cucumbers', price: 1.99, unit: 'each', category: 'Crisp & Cool', description: 'Seedless, thin-skinned, and perfectly crisp. Ideal for salads, snacking, or spa water.', image: 'https://images.unsplash.com/photo-1449300079323-02e209d9d3a6?auto=format&fit=crop&q=80&w=800' },
+                { id: 'v3', name: 'Bundle of Asparagus', price: 3.49, unit: 'bunch', category: 'Spring Greens', description: 'Tender spears with a delicate crunch. Perfect roasted with garlic and olive oil.', image: 'https://images.unsplash.com/photo-1515471209610-dae1c92d8777?auto=format&fit=crop&q=80&w=800' },
+                { id: 'v4', name: 'Crisp Romaine Lettuce', price: 2.29, unit: 'head', category: 'Greens', description: 'The foundation of a great Caesar salad. Crisp, sturdy leaves with a mild, sweet flavor.', image: 'https://images.unsplash.com/photo-1622206151226-18ca2c9ab4a1?auto=format&fit=crop&q=80&w=800' },
+                { id: 'v5', name: 'Sweet Bell Peppers', price: 3.99, unit: 'pack', category: 'Peppers', description: 'A colorful mix of red, yellow, and orange peppers. Sweet, crunchy, and packed with Vitamin C.', image: '/bell-peppers.png' },
+                { id: 'v6', name: 'Earthy Portobello Mushrooms', price: 5.49, unit: '8oz', category: 'Fungi', description: 'Rich, savory, and full of umami. A culinary favorite for stir-fries and luxurious risottos.', image: 'https://images.unsplash.com/photo-1504545102780-26774c1bb073?auto=format&fit=crop&q=80&w=800' }
+            ];
+
+            const { error: insertError } = await supabase
+                .from('products')
+                .insert(initialProducts);
+
+            if (insertError) {
+                console.error("Error seeding products:", insertError);
+            } else {
+                console.log("Seeding complete.");
+            }
+        }
+    } catch (err) {
+        console.error("Unexpected error during seeding:", err);
+    }
+};
+
+app.listen(PORT, async () => {
     console.log(`Backend Server running on port ${PORT}`);
+    await seedProducts();
 });

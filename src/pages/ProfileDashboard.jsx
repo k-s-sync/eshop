@@ -38,7 +38,7 @@ const ProfileDashboard = () => {
 
   const fetchProfile = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/profile', {
+      const res = await fetch('/api/profile', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -52,7 +52,7 @@ const ProfileDashboard = () => {
 
   const fetchAddresses = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/addresses', {
+      const res = await fetch('/api/addresses', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -64,7 +64,7 @@ const ProfileDashboard = () => {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/orders', {
+      const res = await fetch('/api/orders', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -79,7 +79,7 @@ const ProfileDashboard = () => {
     setIsUpdating(true);
     setMessage('');
     try {
-      const res = await fetch('http://localhost:5000/api/profile', {
+      const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(profileData)
@@ -101,7 +101,7 @@ const ProfileDashboard = () => {
   const handleSaveAddress = async (e) => {
     e.preventDefault();
     const isEdit = editingAddressId !== null;
-    const url = isEdit ? `http://localhost:5000/api/addresses/${editingAddressId}` : 'http://localhost:5000/api/addresses';
+    const url = isEdit ? `/api/addresses/${editingAddressId}` : '/api/addresses';
     const method = isEdit ? 'PUT' : 'POST';
 
     try {
@@ -137,7 +137,7 @@ const ProfileDashboard = () => {
   const handleDeleteAddress = async (id) => {
     if(!window.confirm('Delete this address?')) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/addresses/${id}`, {
+      const res = await fetch(`/api/addresses/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

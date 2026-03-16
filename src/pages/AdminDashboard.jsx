@@ -58,8 +58,8 @@ const AdminDashboard = () => {
     e.preventDefault();
     const method = editingProduct ? 'PUT' : 'POST';
     const url = editingProduct 
-      ? `http://localhost:5000/api/admin/products/${editingProduct.id}` 
-      : 'http://localhost:5000/api/admin/products';
+      ? `/api/admin/products/${editingProduct.id}` 
+      : '/api/admin/products';
 
     try {
       const res = await fetch(url, {
@@ -85,7 +85,7 @@ const AdminDashboard = () => {
   const deleteProduct = async (id) => {
     if (!window.confirm("Are you sure you want to delete this product?")) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/products/${id}`, {
+      const res = await fetch(`/api/admin/products/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -98,7 +98,7 @@ const AdminDashboard = () => {
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/orders/${orderId}/status`, {
+      const res = await fetch(`/api/admin/orders/${orderId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
