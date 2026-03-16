@@ -87,7 +87,3 @@ The backend can be deployed to platforms like **Heroku**, **Render**, or a **VPS
   cd backend
   pm2 start server.js --name eshop-backend
   ```
-
----
-
-*Verified and Maintained by Antigravity AI.*
